@@ -52,7 +52,7 @@ namespace ACT.XIVLog
             this.pluginLabel = pluginStatusText;
 
             // 設定ファイルをロードする
-            var i = Config.Instance;
+            _ = Config.Instance;
 
             // 設定Panelを追加する
             pluginScreenSpace.Controls.Add(new ElementHost()
@@ -82,7 +82,8 @@ namespace ACT.XIVLog
 
         private static readonly string[] StopLoggingKeywords = new string[]
         {
-            "wipeout",
+            WipeoutKeywords.WipeoutLog,
+            WipeoutKeywords.WipeoutLogEcho,
             "の攻略を終了した。",
             "End-of-Timeline has been detected.",
         };
@@ -92,7 +93,7 @@ namespace ACT.XIVLog
         public string LogfileName =>
             Path.Combine(
                 Config.Instance.OutputDirectory,
-                $"{DateTime.Now.ToString("yyMMdd")}-{this.fileNo:000}.{this.GetZoneNameForFile()}.take{this.wipeoutCounter:00}.csv");
+                $"{DateTime.Now:yyMMdd}-{this.fileNo:000}.{this.GetZoneNameForFile()}.take{this.wipeoutCounter:00}.csv");
 
         private static readonly char[] InvalidChars = Path.GetInvalidFileNameChars();
 
@@ -120,11 +121,13 @@ namespace ACT.XIVLog
         private static readonly ConcurrentQueue<XIVLog> LogQueue = new ConcurrentQueue<XIVLog>();
         private ThreadWorker dumpLogTask;
         private StreamWriter writter;
-        private StringBuilder writeBuffer = new StringBuilder(5120);
+        private readonly StringBuilder writeBuffer = new StringBuilder(5120);
         private DateTime lastFlushTimestamp = DateTime.MinValue;
         private volatile bool isForceFlush = false;
         private int wipeoutCounter = 1;
         private int fileNo = 1;
+
+        private DateTime lastWroteTimestamp = DateTime.MaxValue;
 
         [MethodImpl(MethodImplOptions.NoInlining)]
         private void InitTask()
@@ -142,11 +145,24 @@ namespace ACT.XIVLog
             {
                 var isNeedsFlush = false;
 
-                if (string.IsNullOrEmpty(Config.Instance.OutputDirectory) ||
-                    LogQueue.IsEmpty)
+                if (string.IsNullOrEmpty(Config.Instance.OutputDirectory))
                 {
                     Thread.Sleep(TimeSpan.FromSeconds(Config.Instance.WriteInterval));
                     return;
+                }
+
+                if (LogQueue.IsEmpty)
+                {
+                    if ((DateTime.Now - this.lastWroteTimestamp).TotalSeconds > 10)
+                    {
+                        this.lastWroteTimestamp = DateTime.MaxValue;
+                        isNeedsFlush = true;
+                    }
+                    else
+                    {
+                        Thread.Sleep(TimeSpan.FromSeconds(Config.Instance.WriteInterval));
+                        return;
+                    }
                 }
 
                 if ((DateTime.Now - this.lastFlushTimestamp).TotalSeconds
@@ -208,6 +224,7 @@ namespace ACT.XIVLog
                     }
 
                     this.writeBuffer.AppendLine(xivlog.ToCSVLine());
+                    this.lastWroteTimestamp = DateTime.Now;
                     Thread.Yield();
                 }
 
@@ -215,8 +232,11 @@ namespace ACT.XIVLog
                     this.isForceFlush ||
                     this.writeBuffer.Length > 5000)
                 {
-                    this.writter.Write(this.writeBuffer.ToString());
-                    this.writeBuffer.Clear();
+                    if (this.writeBuffer.Length > 0)
+                    {
+                        this.writter.Write(this.writeBuffer.ToString());
+                        this.writeBuffer.Clear();
+                    }
 
                     if (isNeedsFlush || this.isForceFlush)
                     {
@@ -251,7 +271,7 @@ namespace ACT.XIVLog
         }
 
         [MethodImpl(MethodImplOptions.NoInlining)]
-        private void OnLogLineRead(
+        private async void OnLogLineRead(
             bool isImport,
             LogLineEventArgs logInfo)
         {
@@ -262,19 +282,24 @@ namespace ACT.XIVLog
                 return;
             }
 
-            var xivlog = new XIVLog(isImport, logInfo);
-            if (string.IsNullOrEmpty(xivlog.Log))
-            {
-                return;
-            }
+            var xivlog = default(XIVLog);
 
-            LogQueue.Enqueue(xivlog);
-
-            if (!isImport)
+            await Task.Run(() =>
             {
-                this.OpenXIVLogAsync(logInfo.logLine);
-                VideoCapture.Instance.DetectCapture(xivlog);
-            }
+                xivlog = new XIVLog(isImport, logInfo);
+                if (string.IsNullOrEmpty(xivlog.Log))
+                {
+                    return;
+                }
+
+                LogQueue.Enqueue(xivlog);
+
+                if (!isImport)
+                {
+                    this.OpenXIVLog(logInfo.logLine);
+                    VideoCapture.Instance.DetectCapture(xivlog);
+                }
+            });
         }
 
         public void EnqueueLogLine(
@@ -301,6 +326,7 @@ namespace ACT.XIVLog
             LogQueue.Enqueue(new XIVLog(false, log));
         }
 
+        /*
         private string ConvertZoneNameToLog()
         {
             var result = this.currentZoneName;
@@ -321,37 +347,36 @@ namespace ACT.XIVLog
 
             return result;
         }
+        */
 
         private const string CommandKeywordOpen = "/xivlog open";
         private const string CommandKeywordFlush = "/xivlog flush";
 
-        private Task OpenXIVLogAsync(
+        private void OpenXIVLog(
             string logLine)
         {
             if (string.IsNullOrEmpty(logLine))
             {
-                return null;
+                return;
             }
 
             if (!File.Exists(this.LogfileName))
             {
-                return null;
+                return;
             }
 
             if (logLine.ContainsIgnoreCase(CommandKeywordOpen))
             {
                 SystemSounds.Beep.Play();
-                return Task.Run(() => Process.Start(this.LogfileName));
+                Task.Run(() => Process.Start(this.LogfileName));
             }
 
             if (logLine.ContainsIgnoreCase(CommandKeywordFlush))
             {
                 this.isForceFlush = true;
                 SystemSounds.Beep.Play();
-                return Task.CompletedTask;
+                return;
             }
-
-            return null;
         }
 
         #region INotifyPropertyChanged
@@ -419,8 +444,7 @@ namespace ACT.XIVLog
             var timeString = line.Substring(1, 12);
 
             var timestampString = DateTime.Now.ToString("yyyy-MM-dd") + " " + timeString;
-            DateTime d;
-            if (DateTime.TryParse(timestampString, out d))
+            if (DateTime.TryParse(timestampString, out DateTime d))
             {
                 this.Timestamp = d;
             }

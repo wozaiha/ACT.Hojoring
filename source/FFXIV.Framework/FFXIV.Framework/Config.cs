@@ -161,7 +161,6 @@ namespace FFXIV.Framework
                         LogMessageType.NetworkDoT => true,
                         LogMessageType.NetworkCancelAbility => true,
                         LogMessageType.NetworkEffectResult => true,
-                        LogMessageType.NetworkStatusList => true,
                         LogMessageType.NetworkUpdateHp => true,
                         LogMessageType.Settings => true,
                         LogMessageType.Process => true,
@@ -180,6 +179,8 @@ namespace FFXIV.Framework
 
         private static string FormatLogMessageType(LogMessageType t)
             => $"0x{((int)t):X2}:{t}";
+
+        private const float CommonSoundVolumeDefault = 0.5f;
 
         #endregion Default Values
 
@@ -216,6 +217,19 @@ namespace FFXIV.Framework
         {
             get => this.xivLocale;
             set => this.SetProperty(ref this.xivLocale, value);
+        }
+
+        private bool isOverlaysAllLocked;
+
+        public bool IsOverlaysAllLocked
+        {
+#if false
+            get => this.isOverlaysAllLocked;
+            set => this.SetProperty(ref this.isOverlaysAllLocked, value);
+#else
+            get => this.isOverlaysAllLocked;
+            set => this.isOverlaysAllLocked = false;
+#endif
         }
 
         public static Locales GetDefaultLocale()
@@ -295,6 +309,14 @@ namespace FFXIV.Framework
                     this.RaisePropertyChanged(nameof(WasapiLoopBufferDuration));
                 }
             }
+        }
+
+        private float commonSoundVolume = CommonSoundVolumeDefault;
+
+        public float CommonSoundVolume
+        {
+            get => this.commonSoundVolume;
+            set => this.SetProperty(ref this.commonSoundVolume, value);
         }
 
         private Dictionary<LogMessageType, ObservableKeyValue<LogMessageType, bool>> globalLogFilterDictionary;

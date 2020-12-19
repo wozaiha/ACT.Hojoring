@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 
 namespace FFXIV.Framework.Common
 {
@@ -7,6 +8,12 @@ namespace FFXIV.Framework.Common
     {
         private const double DefaultMin = 0.05;
         private const double DefaultMax = 1.00;
+
+#if DEBUG
+        public static bool IsDebugMode => true;
+#else
+        public static bool IsDebugMode => false;
+#endif
 
         private static readonly Random random = new Random((int)DateTime.Now.Ticks);
 
@@ -48,6 +55,23 @@ namespace FFXIV.Framework.Common
             foreach (var item in e)
             {
                 action(item);
+            }
+        }
+
+        public static async Task InvokeTasks(
+            IEnumerable<Action> tasks)
+        {
+            var f = true;
+
+            foreach (var task in tasks)
+            {
+                if (!f)
+                {
+                    await Task.Yield();
+                }
+
+                task.Invoke();
+                f = false;
             }
         }
     }

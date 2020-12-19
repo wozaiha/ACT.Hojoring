@@ -25,6 +25,7 @@ namespace ACT.SpecialSpellTimer.RaidTimeline
         Load,
         PositionSync,
         Combatant,
+        HPSync,
         Dump,
         VisualNotice,
         ImageNotice,
@@ -33,6 +34,7 @@ namespace ACT.SpecialSpellTimer.RaidTimeline
         ExpressionsPredicate,
         ExpressionsTable,
         Import,
+        Script,
     }
 
     public static class TimelineElementTypesEx
@@ -49,6 +51,7 @@ namespace ACT.SpecialSpellTimer.RaidTimeline
                 "load",
                 "positionsync",
                 "combatant",
+                "hpsync",
                 "dump",
                 "visualnotice",
                 "imagenotice",
@@ -57,6 +60,7 @@ namespace ACT.SpecialSpellTimer.RaidTimeline
                 "predicate",
                 "table",
                 "import",
+                "script",
             }[(int)t];
 
         public static TimelineElementTypes FromText(

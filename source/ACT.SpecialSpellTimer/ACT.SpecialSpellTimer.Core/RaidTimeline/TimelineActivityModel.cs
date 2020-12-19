@@ -12,6 +12,7 @@ using System.Threading.Tasks;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Xml.Serialization;
+using ACT.SpecialSpellTimer.RazorModel;
 using FFXIV.Framework.Common;
 using FFXIV.Framework.Extensions;
 
@@ -86,6 +87,30 @@ namespace ACT.SpecialSpellTimer.RaidTimeline
             set => this.AddRange(value);
         }
 
+        /// <summary>
+        /// Script
+        /// </summary>
+        [XmlElement(ElementName = "script")]
+        public TimelineScriptModel[] Scripts
+        {
+            get => this.Statements
+                .Where(x => x.TimelineType == TimelineElementTypes.Script)
+                .Cast<TimelineScriptModel>()
+                .ToArray();
+            set
+            {
+                this.AddRange(value);
+
+                if (value != null)
+                {
+                    foreach (var item in value)
+                    {
+                        item.ScriptingEvent = TimelineScriptEvents.Expression;
+                    }
+                }
+            }
+        }
+
         [XmlIgnore]
         public bool IsExpressionAvailable =>
             this.ExpressionsStatements.Any(x => x.Enabled.GetValueOrDefault());
@@ -122,6 +147,47 @@ namespace ACT.SpecialSpellTimer.RaidTimeline
             }
         }
 
+        public bool ExecuteScripts()
+        {
+            var scripts = this.Scripts.Where(x => x.Enabled.GetValueOrDefault());
+
+            if (!scripts.Any())
+            {
+                return true;
+            }
+
+            var totalResult = true;
+
+            lock (TimelineScriptGlobalModel.Instance.ScriptingHost.ScriptingBlocker)
+            {
+                foreach (var script in scripts)
+                {
+                    var result = false;
+                    var returnValue = script.Run();
+
+                    if (returnValue == null)
+                    {
+                        result = true;
+                    }
+                    else
+                    {
+                        if (returnValue is bool b)
+                        {
+                            result = b;
+                        }
+                        else
+                        {
+                            result = true;
+                        }
+                    }
+
+                    totalResult |= result;
+                }
+            }
+
+            return totalResult;
+        }
+
         public void Dump()
         {
             var dumps = this.DumpStatements;
@@ -136,7 +202,8 @@ namespace ACT.SpecialSpellTimer.RaidTimeline
             if (timeline.TimelineType == TimelineElementTypes.VisualNotice ||
                 timeline.TimelineType == TimelineElementTypes.ImageNotice ||
                 timeline.TimelineType == TimelineElementTypes.Expressions ||
-                timeline.TimelineType == TimelineElementTypes.Dump)
+                timeline.TimelineType == TimelineElementTypes.Dump ||
+                timeline.TimelineType == TimelineElementTypes.Script)
             {
                 timeline.Parent = this;
                 this.statements.Add(timeline);
@@ -810,13 +877,13 @@ namespace ACT.SpecialSpellTimer.RaidTimeline
                 Process.Start(ps);
 
                 TimelineController.RaiseLog(
-                    $"[TL] trigger executed. exec={this.ExecuteFileName}, args={this.Arguments}");
+                    $"{TimelineConstants.LogSymbol} trigger executed. exec={this.ExecuteFileName}, args={this.Arguments}");
             }
             catch (Exception ex)
             {
                 AppLog.DefaultLogger.Error(
                     ex,
-                    $"[TL] Error at execute external tool. exec={this.ExecuteFileName}, args={this.Arguments}");
+                    $"{TimelineConstants.LogSymbol} Error at execute external tool. exec={this.ExecuteFileName}, args={this.Arguments}");
             }
         }
 
@@ -900,22 +967,22 @@ namespace ACT.SpecialSpellTimer.RaidTimeline
                 if (response.IsSuccessStatusCode)
                 {
                     TimelineController.RaiseLog(
-                        $"[TL] trigger call REST API. {uri} {method}");
+                        $"{TimelineConstants.LogSymbol} trigger call REST API. {uri} {method}");
                 }
                 else
                 {
                     TimelineController.RaiseLog(
-                        $"[TL] Error at call REST API. {uri} {method} status={(int)response.StatusCode}:{response.StatusCode}");
+                        $"{TimelineConstants.LogSymbol} Error at call REST API. {uri} {method} status={(int)response.StatusCode}:{response.StatusCode}");
                 }
             }
             catch (Exception ex)
             {
                 TimelineController.RaiseLog(
-                    $"[TL] Error at call REST API. {uri} {method} message={ex.Message}");
+                    $"{TimelineConstants.LogSymbol} Error at call REST API. {uri} {method} message={ex.Message}");
 
                 AppLog.DefaultLogger.Error(
                     ex,
-                    $"[TL] Error at call REST API. {uri} {method}");
+                    $"{TimelineConstants.LogSymbol} Error at call REST API. {uri} {method}");
             }
 
             return true;

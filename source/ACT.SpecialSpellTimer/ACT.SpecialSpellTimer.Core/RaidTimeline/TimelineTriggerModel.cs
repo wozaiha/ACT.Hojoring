@@ -11,6 +11,7 @@ using System.Runtime.Serialization.Formatters.Binary;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Xml.Serialization;
+using ACT.SpecialSpellTimer.RazorModel;
 using FFXIV.Framework.Common;
 using Match = System.Text.RegularExpressions.Match;
 
@@ -77,6 +78,17 @@ namespace ACT.SpecialSpellTimer.RaidTimeline
             set => this.AddRange(value);
         }
 
+        [XmlElement(ElementName = "hp-sync")]
+        public TimelineHPSyncModel[] HPSyncStatements
+        {
+            get => this.Statements
+                .Where(x => x.TimelineType == TimelineElementTypes.HPSync)
+                .Cast<TimelineHPSyncModel>()
+                .ToArray();
+
+            set => this.AddRange(value);
+        }
+
         [XmlElement(ElementName = "dump")]
         public TimelineDumpModel[] DumpStatements
         {
@@ -103,6 +115,30 @@ namespace ACT.SpecialSpellTimer.RaidTimeline
                 .ToArray();
 
             set => this.AddRange(value);
+        }
+
+        /// <summary>
+        /// Script
+        /// </summary>
+        [XmlElement(ElementName = "script")]
+        public TimelineScriptModel[] Scripts
+        {
+            get => this.Statements
+                .Where(x => x.TimelineType == TimelineElementTypes.Script)
+                .Cast<TimelineScriptModel>()
+                .ToArray();
+            set
+            {
+                this.AddRange(value);
+
+                if (value != null)
+                {
+                    foreach (var item in value)
+                    {
+                        item.ScriptingEvent = TimelineScriptEvents.Expression;
+                    }
+                }
+            }
         }
 
         [XmlIgnore]
@@ -132,9 +168,61 @@ namespace ACT.SpecialSpellTimer.RaidTimeline
             }
         }
 
+        public bool ExecuteScripts()
+        {
+            var scripts = this.Scripts.Where(x => x.Enabled.GetValueOrDefault());
+
+            if (!scripts.Any())
+            {
+                return true;
+            }
+
+            var totalResult = true;
+
+            lock (TimelineScriptGlobalModel.Instance.ScriptingHost.ScriptingBlocker)
+            {
+                foreach (var script in scripts)
+                {
+#if DEBUG
+                    if (!string.IsNullOrEmpty(script.Name) &&
+                        script.Name.Contains("DEBUG"))
+                    {
+                        Debug.WriteLine(script.Name);
+                    }
+#endif
+                    var result = false;
+                    var returnValue = script.Run();
+
+                    if (returnValue == null)
+                    {
+                        result = true;
+                    }
+                    else
+                    {
+                        if (returnValue is bool b)
+                        {
+                            result = b;
+                        }
+                        else
+                        {
+                            result = true;
+                        }
+                    }
+
+                    totalResult &= result;
+                }
+            }
+
+            return totalResult;
+        }
+
         [XmlIgnore]
         public bool IsPositionSyncAvailable =>
             this.PositionSyncStatements.Any(x => x.Enabled.GetValueOrDefault());
+
+        [XmlIgnore]
+        public bool IsHPSyncAvailable =>
+            this.HPSyncStatements.Any(x => x.Enabled.GetValueOrDefault());
 
         public void Add(TimelineBase timeline)
         {
@@ -142,8 +230,10 @@ namespace ACT.SpecialSpellTimer.RaidTimeline
                 timeline.TimelineType == TimelineElementTypes.VisualNotice ||
                 timeline.TimelineType == TimelineElementTypes.ImageNotice ||
                 timeline.TimelineType == TimelineElementTypes.PositionSync ||
+                timeline.TimelineType == TimelineElementTypes.HPSync ||
                 timeline.TimelineType == TimelineElementTypes.Expressions ||
-                timeline.TimelineType == TimelineElementTypes.Dump)
+                timeline.TimelineType == TimelineElementTypes.Dump ||
+                timeline.TimelineType == TimelineElementTypes.Script)
             {
                 timeline.Parent = this;
                 this.statements.Add(timeline);
@@ -469,7 +559,7 @@ namespace ACT.SpecialSpellTimer.RaidTimeline
         {
             if (this.Enabled.GetValueOrDefault())
             {
-                if (this.IsPositionSyncAvailable)
+                if (this.IsPositionSyncAvailable || this.IsHPSyncAvailable)
                 {
                     return true;
                 }
@@ -501,6 +591,17 @@ namespace ACT.SpecialSpellTimer.RaidTimeline
                         if (psync != null)
                         {
                             psync.LastSyncTimestamp = DateTime.MinValue;
+                        }
+                    }
+                }
+
+                if (this.HPSyncStatements != null)
+                {
+                    foreach (var hpsync in this.HPSyncStatements)
+                    {
+                        if (hpsync != null)
+                        {
+                            hpsync.IsSynced = false;
                         }
                     }
                 }
@@ -700,13 +801,13 @@ namespace ACT.SpecialSpellTimer.RaidTimeline
                 Process.Start(ps);
 
                 TimelineController.RaiseLog(
-                    $"[TL] trigger executed. exec={this.ExecuteFileName}, args={this.Arguments}");
+                    $"{TimelineConstants.LogSymbol} trigger executed. exec={this.ExecuteFileName}, args={this.Arguments}");
             }
             catch (Exception ex)
             {
                 AppLog.DefaultLogger.Error(
                     ex,
-                    $"[TL] Error at execute external tool. exec={this.ExecuteFileName}, args={this.Arguments}");
+                    $"{TimelineConstants.LogSymbol} Error at execute external tool. exec={this.ExecuteFileName}, args={this.Arguments}");
             }
         }
 
@@ -790,22 +891,22 @@ namespace ACT.SpecialSpellTimer.RaidTimeline
                 if (response.IsSuccessStatusCode)
                 {
                     TimelineController.RaiseLog(
-                        $"[TL] trigger call REST API. {uri} {method}");
+                        $"{TimelineConstants.LogSymbol} trigger call REST API. {uri} {method}");
                 }
                 else
                 {
                     TimelineController.RaiseLog(
-                        $"[TL] Error at call REST API. {uri} {method} status={(int)response.StatusCode}:{response.StatusCode}");
+                        $"{TimelineConstants.LogSymbol} Error at call REST API. {uri} {method} status={(int)response.StatusCode}:{response.StatusCode}");
                 }
             }
             catch (Exception ex)
             {
                 TimelineController.RaiseLog(
-                    $"[TL] Error at call REST API. {uri} {method} message={ex.Message}");
+                    $"{TimelineConstants.LogSymbol} Error at call REST API. {uri} {method} message={ex.Message}");
 
                 AppLog.DefaultLogger.Error(
                     ex,
-                    $"[TL] Error at call REST API. {uri} {method}");
+                    $"{TimelineConstants.LogSymbol} Error at call REST API. {uri} {method}");
             }
 
             return true;
